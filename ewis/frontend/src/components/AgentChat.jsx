@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 
 const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-const N8N_AGENT_WEBHOOK = import.meta.env.VITE_N8N_WEBHOOK_AGENT || 'http://localhost:5678/webhook/agent-query'
+const N8N_AGENT_WEBHOOK = import.meta.env.VITE_N8N_WEBHOOK_AGENT || 'http://localhost:5679/webhook/agent-query'
 
 const SESSION_ID = `session-${Date.now()}`
 

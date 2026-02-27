@@ -41,7 +41,7 @@ function Sidebar() {
 
                 <span className="sidebar-section-label" style={{ marginTop: '1rem' }}>System</span>
                 <a
-                    href="http://localhost:5678"
+                    href="http://localhost:5679"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="nav-link"

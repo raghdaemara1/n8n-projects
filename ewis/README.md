@@ -21,7 +21,7 @@
                        │          │
         ┌──────────────▼──┐   ┌───▼──────────────────┐
         │   n8n Workflows  │   │  Google ADK Agent     │
-        │  localhost:5678  │   │  Gemini 1.5 Pro       │
+        │  localhost:5679  │   │  Gemini 1.5 Pro       │
         │                  │   │  5 custom tools       │
         │ WF1: Intake      │──▶│  - classify_project   │
         │ WF2: Documents   │   │  - estimate_effort    │
@@ -76,7 +76,7 @@ docker exec ewis-backend python seed.py
 
 ### Step 4 — Import n8n Workflows
 
-1. Open **http://localhost:5678** (login: `admin` / `changeme`)
+1. Open **http://localhost:5679** (login: `admin` / `changeme`)
 2. Go to **Settings → Import** (or use the `+` button → Import)
 3. Import all 4 JSON files from `n8n-workflows/`:
    - `workflow-1-intake-router.json`

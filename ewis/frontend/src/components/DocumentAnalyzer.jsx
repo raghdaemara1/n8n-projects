@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
 import ReactMarkdown from 'react-markdown'
 
-const N8N_DOC_WEBHOOK = import.meta.env.VITE_N8N_WEBHOOK_DOCUMENT || 'http://localhost:5678/webhook/analyze-document'
+const N8N_DOC_WEBHOOK = import.meta.env.VITE_N8N_WEBHOOK_DOCUMENT || 'http://localhost:5679/webhook/analyze-document'
 
 const MOCK_ANALYSIS = {
     filename: 'sample-rfp-ai-automation.pdf',

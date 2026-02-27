@@ -14,7 +14,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ewis_user} -d ${POSTGRES_DB:-ewis}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ewis_user} -d ${POSTGRES_DB:-ewis}" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -24,7 +24,7 @@ services:
     container_name: ewis-n8n
     restart: unless-stopped
     ports:
-      - "5678:5678"
+      - "5679:5678"
     environment:
       - DB_TYPE=postgresdb
       - DB_POSTGRESDB_HOST=postgres
@@ -38,7 +38,7 @@ services:
       - N8N_HOST=localhost
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
-      - WEBHOOK_URL=http://localhost:5678/
+      - WEBHOOK_URL=http://localhost:5679/
       - GENERIC_TIMEZONE=UTC
       - N8N_METRICS=true
     volumes:
@@ -47,7 +47,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz || exit 1"]
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:5678/healthz || exit 1" ]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -79,7 +79,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1"]
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1" ]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -94,10 +94,10 @@ services:
       - "3000:3000"
     environment:
       - VITE_API_BASE_URL=http://localhost:8000
-      - VITE_N8N_BASE_URL=http://localhost:5678
-      - VITE_N8N_WEBHOOK_INTAKE=http://localhost:5678/webhook/intake
-      - VITE_N8N_WEBHOOK_DOCUMENT=http://localhost:5678/webhook/analyze-document
-      - VITE_N8N_WEBHOOK_AGENT=http://localhost:5678/webhook/agent-query
+      - VITE_N8N_BASE_URL=http://localhost:5679
+      - VITE_N8N_WEBHOOK_INTAKE=http://localhost:5679/webhook/intake
+      - VITE_N8N_WEBHOOK_DOCUMENT=http://localhost:5679/webhook/analyze-document
+      - VITE_N8N_WEBHOOK_AGENT=http://localhost:5679/webhook/agent-query
     volumes:
       - ./frontend:/app
       - /app/node_modules

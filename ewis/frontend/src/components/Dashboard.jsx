@@ -64,7 +64,6 @@ export default function Dashboard() {
             </div>
 
             <div className="page-content">
-                {/* KPI Cards */}
                 <div className="kpi-grid">
                     {KPI_CONFIG.map(cfg => (
                         <div
@@ -87,7 +86,6 @@ export default function Dashboard() {
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: '1.25rem' }}>
-                    {/* Workflow Status Feed */}
                     <div className="card">
                         <div className="section-header">
                             <span className="section-title">⟳ &nbsp;Workflow Status</span>
@@ -123,7 +121,6 @@ export default function Dashboard() {
                         </div>
                     </div>
 
-                    {/* Category Bar Chart */}
                     <div className="card">
                         <div className="section-header">
                             <span className="section-title">◈ &nbsp;Project Categories</span>
@@ -151,13 +148,12 @@ export default function Dashboard() {
                     </div>
                 </div>
 
-                {/* Architecture Info */}
                 <div className="card mt-4" style={{ marginTop: '1.25rem' }}>
                     <div className="section-header">
                         <span className="section-title">◑ &nbsp;System Architecture</span>
                     </div>
-                    <div className="code-block" style={{ fontSize: '0.72rem', lineHeight: 1.9.color: '#a29bfe' }}>
-                    {`                    ┌──────────────────────────┐
+                    <div className="code-block" style={{ fontSize: '0.72rem', lineHeight: 1.9, color: '#a29bfe' }}>
+                        {`                    ┌──────────────────────────┐
                     │     React Dashboard       │  ← localhost:3000
                     │   (this interface)        │
                     └─────────┬────────────────┘
@@ -168,7 +164,7 @@ export default function Dashboard() {
                        │          │
         ┌──────────────▼──┐   ┌───▼──────────────────┐
         │   n8n Workflows  │   │  Google ADK Agent     │  ← Gemini 1.5 Pro
-        │  localhost:5678  │   │  Tools: classify,     │
+        │  localhost:5679  │   │  Tools: classify,     │
         │                  │   │  estimate, recommend, │
         │ WF1: Intake      │   │  search_kb, analyze   │
         │ WF2: Documents   │◀──┤                       │
@@ -179,9 +175,9 @@ export default function Dashboard() {
         ┌────────▼──────────┐
         │    PostgreSQL     │  ← localhost:5432
         └───────────────────┘`}
+                    </div>
                 </div>
             </div>
         </div>
-    </div >
-  )
+    )
 }

@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 
-const N8N_INTAKE_WEBHOOK = import.meta.env.VITE_N8N_WEBHOOK_INTAKE || 'http://localhost:5678/webhook/intake'
+const N8N_INTAKE_WEBHOOK = import.meta.env.VITE_N8N_WEBHOOK_INTAKE || 'http://localhost:5679/webhook/intake'
 
 const INITIAL_FORM = {
     client_name: '',
