@@ -1,0 +1,425 @@
+{
+    "name": "Workflow 1 — Smart Intake Router",
+    "nodes": [
+        {
+            "id": "webhook-intake",
+            "name": "Webhook — Intake",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                100,
+                300
+            ],
+            "webhookId": "intake-webhook-001",
+            "parameters": {
+                "path": "intake",
+                "httpMethod": "POST",
+                "responseMode": "responseNode",
+                "options": {}
+            }
+        },
+        {
+            "id": "set-normalize",
+            "name": "Set — Normalize Data",
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 2,
+            "position": [
+                320,
+                300
+            ],
+            "parameters": {
+                "mode": "manual",
+                "assignments": {
+                    "assignments": [
+                        {
+                            "id": "1",
+                            "name": "client_name",
+                            "value": "={{ $json.client_name?.trim() || 'Unknown' }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "2",
+                            "name": "project_title",
+                            "value": "={{ $json.project_title?.trim() }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "3",
+                            "name": "description",
+                            "value": "={{ $json.description?.trim() }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "4",
+                            "name": "priority",
+                            "value": "={{ ($json.priority || 'medium').toLowerCase() }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "5",
+                            "name": "requester_email",
+                            "value": "={{ $json.requester_email }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "6",
+                            "name": "received_at",
+                            "value": "={{ $now.toISO() }}",
+                            "type": "string"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "ai-classify",
+            "name": "AI — Classify Project",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                540,
+                300
+            ],
+            "parameters": {
+                "method": "POST",
+                "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpQueryAuth",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "key",
+                            "value": "={{ $env.GOOGLE_API_KEY }}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "contentType": "json",
+                "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"You are an enterprise project classifier. Given the project description, return a JSON object with: category (one of: digital_transformation, ai_automation, data_analytics, cloud_migration, iot, security, other), complexity_score (1-10), estimated_days (integer), recommended_team_size (integer), key_technologies (array of strings), summary (2 sentences max). Return ONLY valid JSON.\\n\\nProject: {{ $json.project_title }}\\nDescription: {{ $json.description }}\"\n    }]\n  }],\n  \"generationConfig\": { \"responseMimeType\": \"application/json\", \"temperature\": 0.2 }\n}",
+                "options": {
+                    "retry": {
+                        "enabled": true,
+                        "maxTries": 3,
+                        "waitBetweenTries": 2000
+                    }
+                }
+            }
+        },
+        {
+            "id": "parse-ai",
+            "name": "Code — Parse AI Response",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                760,
+                300
+            ],
+            "parameters": {
+                "jsCode": "const raw = $input.first().json;\nlet classification;\ntry {\n  const text = raw.candidates?.[0]?.content?.parts?.[0]?.text || '{}';\n  classification = JSON.parse(text);\n} catch(e) {\n  classification = { category: 'other', complexity_score: 5, estimated_days: 60, recommended_team_size: 3, key_technologies: [], summary: 'Classification failed — manual review required.' };\n}\nconst prev = $('Set — Normalize Data').first().json;\nreturn [{ json: { ...prev, ...classification } }];"
+            }
+        },
+        {
+            "id": "switch-category",
+            "name": "Switch — Route by Category",
+            "type": "n8n-nodes-base.switch",
+            "typeVersion": 3,
+            "position": [
+                980,
+                300
+            ],
+            "parameters": {
+                "mode": "rules",
+                "rules": {
+                    "rules": [
+                        {
+                            "conditions": {
+                                "options": {
+                                    "caseSensitive": false
+                                },
+                                "conditions": [
+                                    {
+                                        "leftValue": "={{ $json.category }}",
+                                        "rightValue": "ai_automation",
+                                        "operator": {
+                                            "type": "string",
+                                            "operation": "equals"
+                                        }
+                                    }
+                                ]
+                            },
+                            "renameOutput": true,
+                            "outputKey": "ai_automation"
+                        },
+                        {
+                            "conditions": {
+                                "options": {
+                                    "caseSensitive": false
+                                },
+                                "conditions": [
+                                    {
+                                        "leftValue": "={{ $json.category }}",
+                                        "rightValue": "data_analytics",
+                                        "operator": {
+                                            "type": "string",
+                                            "operation": "equals"
+                                        }
+                                    }
+                                ]
+                            },
+                            "renameOutput": true,
+                            "outputKey": "data_analytics"
+                        }
+                    ]
+                },
+                "fallbackOutput": "extra"
+            }
+        },
+        {
+            "id": "http-save-project",
+            "name": "HTTP — Save Project to DB",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1200,
+                300
+            ],
+            "parameters": {
+                "method": "POST",
+                "url": "http://backend:8000/api/projects",
+                "sendBody": true,
+                "contentType": "json",
+                "jsonBody": "={{ JSON.stringify($json) }}",
+                "options": {}
+            }
+        },
+        {
+            "id": "if-priority",
+            "name": "IF — High Priority?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [
+                1420,
+                300
+            ],
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": false,
+                        "leftValue": "",
+                        "typeValidation": "strict"
+                    },
+                    "conditions": [
+                        {
+                            "id": "1",
+                            "leftValue": "={{ $json.priority }}",
+                            "rightValue": "critical,high",
+                            "operator": {
+                                "type": "string",
+                                "operation": "contains"
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "set-response",
+            "name": "Set — Build Response",
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 2,
+            "position": [
+                1640,
+                300
+            ],
+            "parameters": {
+                "mode": "manual",
+                "assignments": {
+                    "assignments": [
+                        {
+                            "id": "1",
+                            "name": "status",
+                            "value": "success",
+                            "type": "string"
+                        },
+                        {
+                            "id": "2",
+                            "name": "message",
+                            "value": "Project intake processed successfully",
+                            "type": "string"
+                        },
+                        {
+                            "id": "3",
+                            "name": "ai_classification",
+                            "value": "={{ $json }}",
+                            "type": "object"
+                        },
+                        {
+                            "id": "4",
+                            "name": "routed_to",
+                            "value": "={{ $json.category === 'ai_automation' ? 'Workflow 3: AI Agent Relay' : $json.category === 'data_analytics' ? 'Workflow 2: Document Analyzer' : 'Main Flow' }}",
+                            "type": "string"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "respond-webhook",
+            "name": "Respond to Webhook",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1,
+            "position": [
+                1860,
+                300
+            ],
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={{ JSON.stringify($json) }}",
+                "options": {
+                    "responseHeaders": {
+                        "entries": [
+                            {
+                                "name": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    ],
+    "connections": {
+        "Webhook — Intake": {
+            "main": [
+                [
+                    {
+                        "node": "Set — Normalize Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Set — Normalize Data": {
+            "main": [
+                [
+                    {
+                        "node": "AI — Classify Project",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "AI — Classify Project": {
+            "main": [
+                [
+                    {
+                        "node": "Code — Parse AI Response",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Code — Parse AI Response": {
+            "main": [
+                [
+                    {
+                        "node": "Switch — Route by Category",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Switch — Route by Category": {
+            "main": [
+                [
+                    {
+                        "node": "HTTP — Save Project to DB",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "HTTP — Save Project to DB",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "HTTP — Save Project to DB",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "HTTP — Save Project to DB": {
+            "main": [
+                [
+                    {
+                        "node": "IF — High Priority?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "IF — High Priority?": {
+            "main": [
+                [
+                    {
+                        "node": "Set — Build Response",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Set — Build Response",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Set — Build Response": {
+            "main": [
+                [
+                    {
+                        "node": "Respond to Webhook",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "saveManualExecutions": true,
+        "callerPolicy": "workflowsFromSameOwner",
+        "errorWorkflow": ""
+    },
+    "staticData": null,
+    "meta": {
+        "templateCredsSetupCompleted": true,
+        "instanceId": "ewis-demo"
+    },
+    "pinData": {},
+    "versionId": "1",
+    "triggerCount": 0,
+    "tags": [
+        {
+            "name": "ewis"
+        },
+        {
+            "name": "intake"
+        }
+    ]
+}

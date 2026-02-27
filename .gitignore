@@ -1,0 +1,22 @@
+node_modules/
+dist/
+build/
+.env
+.env.*
+!.env.example
+*.log
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+__pycache__/
+*.pyc
+venv/
+.venv/
+docker-compose.override.yml
+
+# Markdown exclusion
+*.md
+!README.md
+!**/README.md

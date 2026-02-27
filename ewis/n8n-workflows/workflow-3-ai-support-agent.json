@@ -1,0 +1,390 @@
+{
+    "name": "Workflow 3 — AI Support Agent Relay",
+    "nodes": [
+        {
+            "id": "webhook-agent",
+            "name": "Webhook — Agent Query",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                100,
+                300
+            ],
+            "webhookId": "agent-webhook-003",
+            "parameters": {
+                "path": "agent-query",
+                "httpMethod": "POST",
+                "responseMode": "responseNode",
+                "options": {}
+            }
+        },
+        {
+            "id": "http-history",
+            "name": "HTTP — Get Session History",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                320,
+                300
+            ],
+            "parameters": {
+                "method": "GET",
+                "url": "=http://backend:8000/api/sessions/{{ $json.session_id }}/history",
+                "options": {
+                    "allowUnauthorizedCerts": true
+                }
+            }
+        },
+        {
+            "id": "code-context",
+            "name": "Code — Build Context",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                540,
+                300
+            ],
+            "parameters": {
+                "jsCode": "const webhookData = $('Webhook — Agent Query').first().json;\nconst historyItems = $input.first().json;\nconst history = Array.isArray(historyItems) ? historyItems : [];\n\n// Build context-enriched payload\nconst payload = {\n  session_id: webhookData.session_id || `session-${Date.now()}`,\n  message: webhookData.user_message,\n  history: history.map(h => ({ role: h.role, message: h.message })),\n  tools_enabled: ['classify_project', 'estimate_effort', 'recommend_tech_stack', 'search_knowledge_base', 'analyze_risk'],\n  context: webhookData.context || {}\n};\n\nreturn [{ json: payload }];"
+            }
+        },
+        {
+            "id": "http-invoke",
+            "name": "HTTP — Invoke ADK Agent",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                760,
+                300
+            ],
+            "parameters": {
+                "method": "POST",
+                "url": "http://backend:8000/api/agent/invoke",
+                "sendBody": true,
+                "contentType": "json",
+                "jsonBody": "={{ JSON.stringify($json) }}",
+                "options": {}
+            }
+        },
+        {
+            "id": "code-extract-task",
+            "name": "Code — Extract Task ID",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                980,
+                300
+            ],
+            "parameters": {
+                "jsCode": "const response = $input.first().json;\nconst taskId = response.task_id || null;\nconst sessionId = $('Webhook — Agent Query').first().json.session_id;\nreturn [{ json: { task_id: taskId, session_id: sessionId, attempt: 0, max_attempts: 15 } }];"
+            }
+        },
+        {
+            "id": "wait-poll",
+            "name": "Wait — 2 Seconds",
+            "type": "n8n-nodes-base.wait",
+            "typeVersion": 1,
+            "position": [
+                1200,
+                300
+            ],
+            "parameters": {
+                "amount": 2,
+                "unit": "seconds"
+            }
+        },
+        {
+            "id": "http-status",
+            "name": "HTTP — Poll Agent Status",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1420,
+                300
+            ],
+            "parameters": {
+                "method": "GET",
+                "url": "=http://backend:8000/api/agent/result/{{ $json.task_id }}",
+                "options": {}
+            }
+        },
+        {
+            "id": "if-complete",
+            "name": "IF — Agent Complete?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [
+                1640,
+                200
+            ],
+            "parameters": {
+                "conditions": {
+                    "conditions": [
+                        {
+                            "id": "1",
+                            "leftValue": "={{ $json.status }}",
+                            "rightValue": "completed",
+                            "operator": {
+                                "type": "string",
+                                "operation": "equals"
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "http-save-history",
+            "name": "HTTP — Save Conversation",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1860,
+                200
+            ],
+            "parameters": {
+                "method": "POST",
+                "url": "=http://backend:8000/api/sessions/{{ $('Code — Extract Task ID').first().json.session_id }}/history",
+                "sendBody": true,
+                "contentType": "json",
+                "jsonBody": "={{ JSON.stringify({ role: 'agent', message: $json.result?.answer || '', tool_calls: $json.result?.tool_calls || [] }) }}",
+                "options": {}
+            }
+        },
+        {
+            "id": "set-final",
+            "name": "Set — Final Response",
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 2,
+            "position": [
+                2080,
+                200
+            ],
+            "parameters": {
+                "mode": "manual",
+                "assignments": {
+                    "assignments": [
+                        {
+                            "id": "1",
+                            "name": "status",
+                            "value": "success",
+                            "type": "string"
+                        },
+                        {
+                            "id": "2",
+                            "name": "answer",
+                            "value": "={{ $('HTTP — Poll Agent Status').first().json.result?.answer }}",
+                            "type": "string"
+                        },
+                        {
+                            "id": "3",
+                            "name": "tool_calls",
+                            "value": "={{ $('HTTP — Poll Agent Status').first().json.result?.tool_calls }}",
+                            "type": "object"
+                        },
+                        {
+                            "id": "4",
+                            "name": "session_id",
+                            "value": "={{ $('Code — Extract Task ID').first().json.session_id }}",
+                            "type": "string"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "respond-agent",
+            "name": "Respond to Webhook",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1,
+            "position": [
+                2300,
+                200
+            ],
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={{ JSON.stringify($json) }}"
+            }
+        },
+        {
+            "id": "set-error",
+            "name": "Set — Error Response",
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 2,
+            "position": [
+                1860,
+                400
+            ],
+            "parameters": {
+                "mode": "manual",
+                "assignments": {
+                    "assignments": [
+                        {
+                            "id": "1",
+                            "name": "status",
+                            "value": "error",
+                            "type": "string"
+                        },
+                        {
+                            "id": "2",
+                            "name": "answer",
+                            "value": "The agent is still processing or encountered an error. Please try again.",
+                            "type": "string"
+                        },
+                        {
+                            "id": "3",
+                            "name": "tool_calls",
+                            "value": "=[]",
+                            "type": "object"
+                        }
+                    ]
+                }
+            }
+        }
+    ],
+    "connections": {
+        "Webhook — Agent Query": {
+            "main": [
+                [
+                    {
+                        "node": "HTTP — Get Session History",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "HTTP — Get Session History": {
+            "main": [
+                [
+                    {
+                        "node": "Code — Build Context",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Code — Build Context": {
+            "main": [
+                [
+                    {
+                        "node": "HTTP — Invoke ADK Agent",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "HTTP — Invoke ADK Agent": {
+            "main": [
+                [
+                    {
+                        "node": "Code — Extract Task ID",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Code — Extract Task ID": {
+            "main": [
+                [
+                    {
+                        "node": "Wait — 2 Seconds",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Wait — 2 Seconds": {
+            "main": [
+                [
+                    {
+                        "node": "HTTP — Poll Agent Status",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "HTTP — Poll Agent Status": {
+            "main": [
+                [
+                    {
+                        "node": "IF — Agent Complete?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "IF — Agent Complete?": {
+            "main": [
+                [
+                    {
+                        "node": "HTTP — Save Conversation",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Set — Error Response",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "HTTP — Save Conversation": {
+            "main": [
+                [
+                    {
+                        "node": "Set — Final Response",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Set — Final Response": {
+            "main": [
+                [
+                    {
+                        "node": "Respond to Webhook",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Set — Error Response": {
+            "main": [
+                [
+                    {
+                        "node": "Respond to Webhook",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "saveManualExecutions": true
+    },
+    "meta": {
+        "instanceId": "ewis-demo"
+    },
+    "tags": [
+        {
+            "name": "ewis"
+        },
+        {
+            "name": "agent"
+        }
+    ]
+}

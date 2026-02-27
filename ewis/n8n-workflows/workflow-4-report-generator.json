@@ -1,0 +1,276 @@
+{
+    "name": "Workflow 4 — Automated Weekly Intelligence Report",
+    "nodes": [
+        {
+            "id": "cron-trigger",
+            "name": "Cron — Every Monday 8AM",
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1,
+            "position": [
+                100,
+                300
+            ],
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "cronExpression",
+                            "expression": "0 8 * * 1"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "http-projects",
+            "name": "HTTP — Fetch Week Projects",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                320,
+                200
+            ],
+            "parameters": {
+                "method": "GET",
+                "url": "http://backend:8000/api/projects?since=7days",
+                "options": {}
+            }
+        },
+        {
+            "id": "http-docs",
+            "name": "HTTP — Fetch Week Documents",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                320,
+                400
+            ],
+            "parameters": {
+                "method": "GET",
+                "url": "http://backend:8000/api/documents?since=7days",
+                "options": {}
+            }
+        },
+        {
+            "id": "merge-data",
+            "name": "Merge — Projects + Docs",
+            "type": "n8n-nodes-base.merge",
+            "typeVersion": 2,
+            "position": [
+                540,
+                300
+            ],
+            "parameters": {
+                "mode": "combine",
+                "combinationMode": "dotNotation",
+                "options": {}
+            }
+        },
+        {
+            "id": "code-aggregate-report",
+            "name": "Code — Aggregate Report Data",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                760,
+                300
+            ],
+            "parameters": {
+                "jsCode": "const projectsRaw = $('HTTP — Fetch Week Projects').first().json;\nconst docsRaw = $('HTTP — Fetch Week Documents').first().json;\nconst projects = Array.isArray(projectsRaw) ? projectsRaw : [];\nconst docs = Array.isArray(docsRaw) ? docsRaw : [];\n\n// Category breakdown\nconst categoryCount = {};\nprojects.forEach(p => { categoryCount[p.category || 'other'] = (categoryCount[p.category || 'other'] || 0) + 1; });\n\n// Complexity stats\nconst avgComplexity = projects.length ? (projects.reduce((s, p) => s + (p.complexity_score || 0), 0) / projects.length).toFixed(1) : 0;\n\n// Priority breakdown\nconst criticalCount = projects.filter(p => p.priority === 'critical').length;\nconst highCount = projects.filter(p => p.priority === 'high').length;\n\nconst weekStart = new Date();\nweekStart.setDate(weekStart.getDate() - 7);\n\nconst context = {\n  week_start: weekStart.toISOString().split('T')[0],\n  generated_at: new Date().toISOString(),\n  project_count: projects.length,\n  doc_count: docs.length,\n  category_breakdown: categoryCount,\n  avg_complexity: avgComplexity,\n  critical_projects: criticalCount,\n  high_priority_projects: highCount,\n  projects_summary: projects.map(p => ({ title: p.project_title, client: p.client_name, category: p.category, complexity: p.complexity_score, priority: p.priority, summary: p.ai_summary })),\n  doc_topics: docs.flatMap(d => d.main_topics || []).filter((v, i, a) => a.indexOf(v) === i).slice(0, 10)\n};\n\nreturn [{ json: context }];"
+            }
+        },
+        {
+            "id": "ai-generate-report",
+            "name": "AI — Generate Intelligence Report",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                980,
+                300
+            ],
+            "parameters": {
+                "method": "POST",
+                "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "key",
+                            "value": "={{ $env.GOOGLE_API_KEY }}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "contentType": "json",
+                "jsonBody": "={\n  \"contents\": [{ \"parts\": [{ \"text\": \"You are an enterprise intelligence analyst at a global IT services firm. Given the following week's data, write a comprehensive Weekly Intelligence Report with these sections: # Weekly Intelligence Report, ## Executive Summary, ## Project Volume & Category Breakdown (include markdown table), ## Key Themes This Week, ## Risk Alerts (use ⚠️ emoji for critical items), ## Top Recommended Actions (numbered list), ## KPI Summary Table. Use professional markdown formatting.\\n\\nWeek Data: {{ JSON.stringify($json) }}\" }] }],\n  \"generationConfig\": { \"temperature\": 0.5 }\n}",
+                "options": {
+                    "retry": {
+                        "enabled": true,
+                        "maxTries": 3
+                    }
+                }
+            }
+        },
+        {
+            "id": "code-html",
+            "name": "Code — Convert to HTML",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1200,
+                300
+            ],
+            "parameters": {
+                "jsCode": "const aiResponse = $input.first().json;\nconst markdown = aiResponse.candidates?.[0]?.content?.parts?.[0]?.text || 'Report generation failed.';\nconst context = $('Code — Aggregate Report Data').first().json;\n\n// Simple markdown-to-HTML conversion\nlet html = markdown\n  .replace(/^# (.+)$/mg, '<h1>$1</h1>')\n  .replace(/^## (.+)$/mg, '<h2>$1</h2>')\n  .replace(/^### (.+)$/mg, '<h3>$1</h3>')\n  .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')\n  .replace(/\\*(.+?)\\*/g, '<em>$1</em>')\n  .replace(/^- (.+)$/mg, '<li>$1</li>')\n  .replace(/^\\d+\\. (.+)$/mg, '<li>$1</li>')\n  .replace(/<\\/li>\\n<li>/g, '</li><li>')\n  .replace(/(<li>.*<\\/li>)/gs, '<ul>$1</ul>')\n  .replace(/\\n/g, '<br/>');\n\nconst reportHtml = `<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><style>body{font-family:Inter,sans-serif;max-width:900px;margin:2rem auto;padding:2rem;color:#1a1a2e;background:#f8f9fa}h1{color:#6c63ff;border-bottom:3px solid #6c63ff;padding-bottom:0.5rem}h2{color:#2d2d4e;margin-top:2rem}h3{color:#6c63ff}table{border-collapse:collapse;width:100%;margin:1rem 0}th{background:#6c63ff;color:white;padding:10px;text-align:left}td{border:1px solid #ddd;padding:8px}tr:nth-child(even){background:#f2f0ff}ul{padding-left:1.5rem}li{margin:0.3rem 0}strong{color:#2d2d4e}.meta{font-size:0.8rem;color:#888;margin-bottom:2rem}</style></head><body><div class=\"meta\">Generated: ${new Date().toLocaleString()} | Projects: ${context.project_count} | Documents: ${context.doc_count}</div>${html}</body></html>`;\n\nreturn [{ json: { report_markdown: markdown, report_html: reportHtml, week_start: context.week_start, project_count: context.project_count, doc_count: context.doc_count } }];"
+            }
+        },
+        {
+            "id": "http-save-report",
+            "name": "HTTP — Archive Report",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1420,
+                300
+            ],
+            "parameters": {
+                "method": "POST",
+                "url": "http://backend:8000/api/reports",
+                "sendBody": true,
+                "contentType": "json",
+                "jsonBody": "={{ JSON.stringify($json) }}",
+                "options": {}
+            }
+        },
+        {
+            "id": "slack-notify",
+            "name": "Slack — Post Summary",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1640,
+                200
+            ],
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+                "sendBody": true,
+                "contentType": "json",
+                "jsonBody": "={ \"text\": \"📊 *Weekly Intelligence Report Generated*\\n> Projects this week: {{ $('Code — Aggregate Report Data').first().json.project_count }}\\n> Documents analyzed: {{ $('Code — Aggregate Report Data').first().json.doc_count }}\\n> View full report in EWIS Dashboard\" }",
+                "options": {
+                    "allowUnauthorizedCerts": true
+                }
+            }
+        }
+    ],
+    "connections": {
+        "Cron — Every Monday 8AM": {
+            "main": [
+                [
+                    {
+                        "node": "HTTP — Fetch Week Projects",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "HTTP — Fetch Week Documents",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "HTTP — Fetch Week Projects": {
+            "main": [
+                [
+                    {
+                        "node": "Merge — Projects + Docs",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "HTTP — Fetch Week Documents": {
+            "main": [
+                [
+                    {
+                        "node": "Merge — Projects + Docs",
+                        "type": "main",
+                        "index": 1
+                    }
+                ]
+            ]
+        },
+        "Merge — Projects + Docs": {
+            "main": [
+                [
+                    {
+                        "node": "Code — Aggregate Report Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Code — Aggregate Report Data": {
+            "main": [
+                [
+                    {
+                        "node": "AI — Generate Intelligence Report",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "AI — Generate Intelligence Report": {
+            "main": [
+                [
+                    {
+                        "node": "Code — Convert to HTML",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Code — Convert to HTML": {
+            "main": [
+                [
+                    {
+                        "node": "HTTP — Archive Report",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "HTTP — Archive Report": {
+            "main": [
+                [
+                    {
+                        "node": "Slack — Post Summary",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "saveManualExecutions": true
+    },
+    "meta": {
+        "instanceId": "ewis-demo"
+    },
+    "tags": [
+        {
+            "name": "ewis"
+        },
+        {
+            "name": "reports"
+        }
+    ]
+}

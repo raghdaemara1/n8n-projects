@@ -1,0 +1,309 @@
+{
+    "name": "Workflow 2 — Document Intelligence Analyzer",
+    "nodes": [
+        {
+            "id": "webhook-doc",
+            "name": "Webhook — Document",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                100,
+                300
+            ],
+            "webhookId": "document-webhook-002",
+            "parameters": {
+                "path": "analyze-document",
+                "httpMethod": "POST",
+                "responseMode": "responseNode",
+                "options": {}
+            }
+        },
+        {
+            "id": "code-extract",
+            "name": "Code — Extract & Validate",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                320,
+                300
+            ],
+            "parameters": {
+                "jsCode": "const body = $input.first().json;\nconst filename = body.filename || 'document.txt';\nlet text = body.text || '';\n\nif (body.content_base64) {\n  try {\n    text = Buffer.from(body.content_base64, 'base64').toString('utf-8');\n  } catch(e) {\n    text = '[Base64 decode failed — binary document]';\n  }\n}\n\nif (!text) {\n  throw new Error('No text content found in document');\n}\n\nconst MAX_CHARS = 15000;\nif (text.length > MAX_CHARS) {\n  text = text.substring(0, MAX_CHARS) + '\\n[Document truncated for processing...]';\n}\n\nconst CHUNK_SIZE = 3000;\nconst chunks = [];\nfor (let i = 0; i < text.length; i += CHUNK_SIZE) {\n  chunks.push({ chunk_index: chunks.length, total_chunks: Math.ceil(text.length / CHUNK_SIZE), chunk_text: text.slice(i, i + CHUNK_SIZE), filename });\n}\n\nreturn chunks.map(c => ({ json: c }));"
+            }
+        },
+        {
+            "id": "split-batches",
+            "name": "Split In Batches",
+            "type": "n8n-nodes-base.splitInBatches",
+            "typeVersion": 3,
+            "position": [
+                540,
+                300
+            ],
+            "parameters": {
+                "batchSize": 1,
+                "options": {}
+            }
+        },
+        {
+            "id": "ai-extract",
+            "name": "AI — Extract Per Chunk",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                760,
+                300
+            ],
+            "parameters": {
+                "method": "POST",
+                "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "key",
+                            "value": "={{ $env.GOOGLE_API_KEY }}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "contentType": "json",
+                "jsonBody": "={\n  \"contents\": [{ \"parts\": [{ \"text\": \"Extract from this document chunk: key entities (people, orgs, dates), main topics (list of strings), action items (list of strings), risks (list of strings), technology mentions (list of strings). Return ONLY valid JSON with keys: extracted_entities, main_topics, action_items, risks, tech_mentions.\\n\\nChunk {{ $json.chunk_index + 1 }}/{{ $json.total_chunks }}:\\n{{ $json.chunk_text }}\" }] }],\n  \"generationConfig\": { \"responseMimeType\": \"application/json\", \"temperature\": 0.1 }\n}",
+                "options": {
+                    "retry": {
+                        "enabled": true,
+                        "maxTries": 3,
+                        "waitBetweenTries": 2000
+                    }
+                }
+            }
+        },
+        {
+            "id": "merge-results",
+            "name": "Merge — All Chunks",
+            "type": "n8n-nodes-base.merge",
+            "typeVersion": 2,
+            "position": [
+                980,
+                300
+            ],
+            "parameters": {
+                "mode": "append",
+                "options": {}
+            }
+        },
+        {
+            "id": "code-aggregate",
+            "name": "Code — Aggregate & Deduplicate",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1200,
+                300
+            ],
+            "parameters": {
+                "jsCode": "const items = $input.all();\nconst dedup = arr => [...new Set(arr.flat().filter(Boolean))];\nlet aggregated = { extracted_entities: {}, main_topics: [], action_items: [], risks: [], tech_mentions: [] };\n\nfor (const item of items) {\n  let parsed;\n  try {\n    const text = item.json.candidates?.[0]?.content?.parts?.[0]?.text || '{}';\n    parsed = JSON.parse(text);\n  } catch { continue; }\n  if (parsed.extracted_entities) {\n    Object.entries(parsed.extracted_entities).forEach(([k,v]) => {\n      aggregated.extracted_entities[k] = [...new Set([...(aggregated.extracted_entities[k] || []), ...(Array.isArray(v) ? v : [v])])];\n    });\n  }\n  ['main_topics','action_items','risks','tech_mentions'].forEach(k => {\n    if (Array.isArray(parsed[k])) aggregated[k].push(...parsed[k]);\n  });\n}\n\n['main_topics','action_items','risks','tech_mentions'].forEach(k => {\n  aggregated[k] = dedup(aggregated[k]);\n});\n\n// Get filename from first item metadata stored in body\nconst filename = $('Webhook — Document').first().json.filename || 'document';\nreturn [{ json: { ...aggregated, filename } }];"
+            }
+        },
+        {
+            "id": "ai-summarize",
+            "name": "AI — Executive Summary",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1420,
+                300
+            ],
+            "parameters": {
+                "method": "POST",
+                "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "key",
+                            "value": "={{ $env.GOOGLE_API_KEY }}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "contentType": "json",
+                "jsonBody": "={\n  \"contents\": [{ \"parts\": [{ \"text\": \"Given this aggregated document analysis data, write a structured executive summary with: ## Overview, ## Key Findings, ## Risks, ## Recommended Actions, ## Technology Stack Detected. Use markdown formatting. Be concise but comprehensive.\\n\\nData: {{ JSON.stringify($json) }}\" }] }],\n  \"generationConfig\": { \"temperature\": 0.4 }\n}",
+                "options": {
+                    "retry": {
+                        "enabled": true,
+                        "maxTries": 3
+                    }
+                }
+            }
+        },
+        {
+            "id": "code-final",
+            "name": "Code — Build Final Result",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1640,
+                300
+            ],
+            "parameters": {
+                "jsCode": "const aiResponse = $input.first().json;\nconst summary = aiResponse.candidates?.[0]?.content?.parts?.[0]?.text || 'Summary generation failed.';\nconst prev = $('Code — Aggregate & Deduplicate').first().json;\nconst result = { ...prev, executive_summary: summary, processed_at: new Date().toISOString() };\n\n// Save to DB\nreturn [{ json: result }];"
+            }
+        },
+        {
+            "id": "http-save-doc",
+            "name": "HTTP — Save Document Analysis",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1860,
+                300
+            ],
+            "parameters": {
+                "method": "POST",
+                "url": "http://backend:8000/api/documents",
+                "sendBody": true,
+                "contentType": "json",
+                "jsonBody": "={{ JSON.stringify($json) }}",
+                "options": {}
+            }
+        },
+        {
+            "id": "respond-doc",
+            "name": "Respond to Webhook",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1,
+            "position": [
+                2080,
+                300
+            ],
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={{ JSON.stringify({ status: 'success', analysis: $('Code — Build Final Result').first().json }) }}"
+            }
+        }
+    ],
+    "connections": {
+        "Webhook — Document": {
+            "main": [
+                [
+                    {
+                        "node": "Code — Extract & Validate",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Code — Extract & Validate": {
+            "main": [
+                [
+                    {
+                        "node": "Split In Batches",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Split In Batches": {
+            "main": [
+                [
+                    {
+                        "node": "AI — Extract Per Chunk",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Merge — All Chunks",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "AI — Extract Per Chunk": {
+            "main": [
+                [
+                    {
+                        "node": "Merge — All Chunks",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Merge — All Chunks": {
+            "main": [
+                [
+                    {
+                        "node": "Code — Aggregate & Deduplicate",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Code — Aggregate & Deduplicate": {
+            "main": [
+                [
+                    {
+                        "node": "AI — Executive Summary",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "AI — Executive Summary": {
+            "main": [
+                [
+                    {
+                        "node": "Code — Build Final Result",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Code — Build Final Result": {
+            "main": [
+                [
+                    {
+                        "node": "HTTP — Save Document Analysis",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "HTTP — Save Document Analysis": {
+            "main": [
+                [
+                    {
+                        "node": "Respond to Webhook",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "saveManualExecutions": true
+    },
+    "meta": {
+        "instanceId": "ewis-demo"
+    },
+    "tags": [
+        {
+            "name": "ewis"
+        },
+        {
+            "name": "documents"
+        }
+    ]
+}
